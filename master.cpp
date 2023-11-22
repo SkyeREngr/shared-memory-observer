@@ -12,6 +12,10 @@
 #include <semaphore.h>
 #include <errno.h>
 
+#include "myShm.h"
+
+//count_ptr->count instead of count_ptr.count
+
 int main (int argc, char* argv[]) {
     //Commandline arguments
     int num_of_children = atoi(argv[1]) + 1;
@@ -21,8 +25,8 @@ int main (int argc, char* argv[]) {
 
     //Variable initializations
     int shm_fd, i;
-    int *count_ptr;	                                                                                //pointer to shared variable count, need mutual exclusion for access
-    int *response = new int[10];                                                                    //pointer to shared array holding responses
+    int *shm_base;	                                                                                //pointer to shared variable count, need mutual exclusion for access
+    int *shm_resp = new int[10];                                                                    //pointer to shared array holding responses
     int child_fin = 0;
 
     //Text block begins here
@@ -40,19 +44,23 @@ int main (int argc, char* argv[]) {
     ftruncate(shm_fd, SIZE);
 
     //map shared memory segment in the address space of the process
-    count_ptr = (int *) mmap(0,2048,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
-    if (count_ptr == MAP_FAILED) {
+    shm_base = (int *) mmap(0,2048,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
+    if (shm_base == MAP_FAILED) {
         printf("observer: Map failed: %s\n", strerror(errno)); exit(1);
     }
 
     //map shared memory segment in the address space of the process (2)
-    response = (int *) mmap(0,2048,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
-    if (count_ptr == MAP_FAILED) {
+    shm_resp = (int *) mmap(0,2048,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
+    if (shm_resp == MAP_FAILED) {
         printf("observer: Map failed: %s\n", strerror(errno)); exit(1);
     }
 
+    //structure shared memory segment to struct CLASS
+    struct CLASS *count_ptr = (struct CLASS *) shm_base;
+    struct CLASS *resp_ptr = (struct CLASS *) shm_resp;
+
     //Initialize shared count
-    *count_ptr = 0;
+    count_ptr -> count = 0;
     printf("Master initialized index in the shared structure to zero\n");
 
     //open a named semaphore for mutual exclusion
@@ -83,11 +91,11 @@ int main (int argc, char* argv[]) {
                 //all child processes finished
                 printf("\nMaster received termination signals from all %d child processes\n", num_of_children - 1);
                 printf("Updated context of shared memory segment after access by child processes: \n");
-                (*count_ptr)--;
+                (count_ptr->count)--;
                 for(int i = 1; i < (num_of_children * 2) - 1; i++){
                     //text block for shared data
-                    printf("%s[%d]: %d\n", shmName, *count_ptr, response[*count_ptr]);
-                    (*count_ptr)--;
+                    printf("%s[%d]: %d\n", shmName, count_ptr->count, (resp_ptr->response)[count_ptr->count]);
+                    (count_ptr->count)--;
                 }
             }
         }
@@ -107,10 +115,10 @@ int main (int argc, char* argv[]) {
     printf("Master removed the semaphore\n");
 
     //remove mapped memory segment from the address space
-    if (munmap(count_ptr,2048) == -1) {
+    if (munmap(shm_base,2048) == -1) {
         printf("observer: Unmap 1 failed: %s\n", strerror(errno)); exit(1);
     }
-    if (munmap(response,2048) == -1) {
+    if (munmap(shm_resp,2048) == -1) {
         printf("observer: Unmap 2 failed: %s\n", strerror(errno)); exit(1);
     }
 
