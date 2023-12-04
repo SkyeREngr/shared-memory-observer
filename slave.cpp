@@ -49,16 +49,19 @@ int main (int argc, char* argv[]) {
     struct CLASS *resp_ptr = (struct CLASS *) shm_resp;
 
     //create a named semaphore for mutual exclusion
-    sem_t *mutex_sem = sem_open( semName, O_CREAT, 0660, 1);
-    if (mutex_sem == SEM_FAILED) {
+    sem_t *IO_sem = sem_open( semName, O_CREAT, 0660, 1);
+    if (IO_sem == SEM_FAILED) {
         printf("observer: sem_open failed: %s\n", strerror(errno)); exit(1);
     }
 
-
     //Critical Section manipulation
-    //lock mutex_sem for critical section
-    if (sem_wait(mutex_sem) == -1) {
+    //lock IO_sem for using the output display
+    if (sem_wait(IO_sem) == -1) {
         printf("observer: sem_wait failed: %s/n", strerror(errno)); exit(1);
+    }
+    //lock mutex_sem for the count access
+    if (sem_wait(&(count_ptr->mutex_sem)) == -1) {
+        printf("observer: sem_wait(count_ptr->mutex_sem) failed: %s/n", strerror(errno)); exit(1);
     }
     
     if(childNum == 0){
@@ -85,8 +88,12 @@ int main (int argc, char* argv[]) {
         printf("Child %d closed access to shared memory and terminates.\n", childNum);
     }
 
-    //exit critical section, release mutex_sem
-    if (sem_post(mutex_sem) == -1) {
+    //exit critical section, release IO_sem & mutex_sem
+    if (sem_post(IO_sem) == -1) {
         printf("observer: sem_post failed: %s\n", strerror(errno)); exit(1);
+    }
+    if (sem_post(&(count_ptr->mutex_sem)) == -1) {
+        printf("observer: sem_post(count_ptr->mutex_sem) failed: %s\n", strerror(errno));
+        exit(1);
     }
 }

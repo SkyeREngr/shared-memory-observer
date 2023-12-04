@@ -59,13 +59,32 @@ int main (int argc, char* argv[]) {
     struct CLASS *count_ptr = (struct CLASS *) shm_base;
     struct CLASS *resp_ptr = (struct CLASS *) shm_resp;
 
-    //Initialize shared count
+    //init/open an unnamed semaphore for mutual exclusion for shared index variable (count)
+    //initialize mutex_sem in shared memory
+    if (sem_init(&(count_ptr->mutex_sem), 0, 1) == -1) {
+        printf("observer: sem_init(count_ptr->mutex_sem) failed: %s/n", strerror(errno));
+        exit(1);
+    }
+
+    //lock mutex_sem to initialize shared count
+    if (sem_wait(&(count_ptr->mutex_sem)) == -1) {
+        printf("observer: sem_wait(count_ptr->mutex_sem) failed: %s/n", strerror(errno));
+        exit(1);
+    }
+
+    //Initialize shared count (Critical section change)
     count_ptr -> count = 0;
     printf("Master initialized index in the shared structure to zero\n");
 
-    //open a named semaphore for mutual exclusion
-    sem_t *mutex_sem = sem_open( semName, O_CREAT, 0660, 1);
-    if (mutex_sem == SEM_FAILED) {
+    //unlock mutex_sem 
+    if (sem_post(&(count_ptr->mutex_sem)) == -1) {
+        printf("observer: sem_post(count_ptr->mutex_sem) failed: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    //open a named semaphore for mutual exclusion for I/O control
+    sem_t *IO_sem = sem_open( semName, O_CREAT, 0660, 1);
+    if (IO_sem == SEM_FAILED) {
         printf("observer: sem_open failed: %s\n", strerror(errno)); exit(1);
     }
     printf("Master created a semaphore named %s\n", semName);
@@ -101,10 +120,16 @@ int main (int argc, char* argv[]) {
         }
     }
 
-
     //Close and free resources attached to shm and semaphores
-    //done with semaphore, close it & free up resources allocated to it
-    if (sem_close(mutex_sem) == -1) {
+    //done with mutex_sem, destroy it
+    if (sem_destroy(&(count_ptr->mutex_sem)) == -1) {
+        printf("observer: sem_destroy(count_ptr->mutex_sem) failed: %s\n", strerror(errno));
+        exit(1);
+    }
+    printf("Master destroyed the unnamed semaphore\n");
+
+    //done with IO semaphore, close it & free up resources allocated to it
+    if (sem_close(IO_sem) == -1) {
         printf("observer: sem_close failed: %s\n", strerror(errno)); exit(1);
     }
 
@@ -112,7 +137,7 @@ int main (int argc, char* argv[]) {
     if (sem_unlink(semName) == -1) {
         printf("observer: sem_unlink failed: %s\n", strerror(errno)); exit(1);
     }
-    printf("Master removed the semaphore\n");
+    printf("Master removed the named semaphore\n");
 
     //remove mapped memory segment from the address space
     if (munmap(shm_base,2048) == -1) {
